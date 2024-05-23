@@ -1,0 +1,51 @@
+name: vLLM Inference Server Example
+type: inference
+targetType: textgeneration
+
+runtimeParameterDefinitions:
+  - fieldName: model
+    type: string
+    defaultValue: meta-llama/Meta-Llama-3-8B-Instruct
+    description: Name of the model to download from HuggingFace **or** path to pre-downloaded model.
+
+  - fieldName: HuggingFaceToken
+    type: credential
+    credentialType: api_token
+    description: |-
+      Access Token from HuggingFace (https://huggingface.co/settings/tokens). Only
+      required if the model was not downloaded in the `custom.py:load_model` function.
+
+  - fieldName: max_tokens
+    type: numeric
+    defaultValue: 256
+    minValue: 1
+    description: max number of symbols in response
+
+  - fieldName: system_prompt
+    type: string
+    defaultValue: You are a helpful AI assistant. Keep short answers of no more than 2 sentences.
+    description: instructions to the model, to set the tone of model completions
+
+  - fieldName: prompt_column_name
+    type: string
+    defaultValue: user_prompt
+    description: column with user's prompt (each row is a separate completion request)
+
+  - fieldName: max_model_len
+    type: numeric
+    description: |-
+      Model context length. If unspecified, will be automatically derived from the model config
+
+  - fieldName: gpu_memory_utilization
+    type: numeric
+    defaultValue: 0.9
+    minValue: 0
+    maxValue: 1
+    description: |-
+      The fraction of GPU memory to be used for the model executor, which can range from 0 to 1.
+      For example, a value of 0.5 would imply 50% GPU memory utilization
+
+  - fieldName: trust_remote_code
+    type: boolean
+    defaultValue: False
+    description: Trust remote code from HuggingFace.

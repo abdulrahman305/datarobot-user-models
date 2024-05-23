@@ -19,7 +19,7 @@
                 "monitor": "{{ monitor }}",
                 "monitor_embedded": "{{ monitor_embedded }}",
                 "model_id": "{{ model_id }}",
-                "deployment_id": "{{ deployment_id }}",
+                "deployment_id": {{ deployment_id | jsonify }},
                 "monitor_settings": {{ monitor_settings | jsonify }},
                 "external_webserver_url": "{{ external_webserver_url }}",
                 "api_token": "{{ api_token }}",
@@ -28,7 +28,10 @@
                 "content_type": {{ content_type }},
                 "allow_dr_api_access": "{{ allow_dr_api_access }}",
                 "user_secrets_mount_path": {{ user_secrets_mount_path | jsonify }},
-                "user_secrets_prefix": {{ user_secrets_prefix | jsonify}}
+                "user_secrets_prefix": {{ user_secrets_prefix | jsonify}},
+                "gpu_predictor": {{ gpu_predictor | jsonify }},
+                "triton_host": {{ triton_host | jsonify }},
+                "triton_http_port": {{ triton_http_port }}
               }
           }
       ]

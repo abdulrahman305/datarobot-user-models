@@ -109,6 +109,12 @@ class PredictionServer(ConnectableComponent, PredictMixin):
             )
 
             self._predictor = NemoPredictor()
+        elif self._gpu_predictor_type and self._gpu_predictor_type == GPU_PREDICTORS.VLLM:
+            from datarobot_drum.drum.gpu_predictors.vllm_predictor import (
+                VllmPredictor,
+            )
+
+            self._predictor = VllmPredictor()
         else:
             raise DrumCommonException(
                 "Prediction server doesn't support language: {} ".format(self._run_language)
@@ -132,7 +138,7 @@ class PredictionServer(ConnectableComponent, PredictMixin):
         self._stdout_flusher.set_last_activity_time()
 
     def _materialize(self, parent_data_objs, user_data):
-        model_api = base_api_blueprint(self._terminate)
+        model_api = base_api_blueprint(self._terminate, self._predictor)
 
         @model_api.route("/capabilities/", methods=["GET"])
         def capabilities():
@@ -152,6 +158,9 @@ class PredictionServer(ConnectableComponent, PredictMixin):
 
         @model_api.route("/health/", methods=["GET"])
         def health():
+            if hasattr(self._predictor, "readiness_probe"):
+                return self._predictor.readiness_probe()
+
             return {"message": "OK"}, HTTP_200_OK
 
         @model_api.route("/predictions/", methods=["POST"])

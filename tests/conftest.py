@@ -22,7 +22,7 @@ from tests.constants import (
     PYTHON_ONNX,
     PYTHON_PYPMML,
     R_LANG,
-    JAVA,
+    JAVA_CODEGEN,
     ANOMALY,
     BINARY,
     BINARY_BOOL,
@@ -148,6 +148,9 @@ from tests.constants import (
     MULTICLASS_LABEL_SPACES,
     TEXT_GENERATION,
     PYTHON_TEXT_GENERATION,
+    GPU_TRITON,
+    GPU_NEMO,
+    GPU_VLLM,
 )
 from datarobot_drum.drum.adapters.model_adapters.python_model_adapter import PythonModelAdapter
 from tests.constants import PYTHON_UNSTRUCTURED_DR_API_ACCESS
@@ -211,8 +214,11 @@ framework_envs = {
         R_NO_ARTIFACTS,
         R_MULTI_ARTIFACT_NEGATIVE,
     ],
-    JAVA: [CODEGEN, MOJO, POJO],
+    JAVA_CODEGEN: [CODEGEN, MOJO, POJO],
     JULIA: [MLJ],
+    GPU_TRITON: [GPU_TRITON],
+    GPU_NEMO: [GPU_NEMO],
+    GPU_VLLM: [GPU_VLLM],
 }
 
 
@@ -229,6 +235,12 @@ def skip_if_framework_not_in_env(framework, framework_env):
         )
 
 
+def skip_if_keys_not_in_env(expected_keys):
+    missing_keys = [key for key in expected_keys if key not in os.environ]
+    if missing_keys:
+        pytest.skip(f"Skipping test, missing environment variables: {missing_keys}")
+
+
 def pytest_addoption(parser):
     parser.addoption(
         "--framework-env",
@@ -242,8 +254,11 @@ def pytest_addoption(parser):
             PYTHON_ONNX,
             PYTHON_PYPMML,
             R_LANG,
-            JAVA,
+            JAVA_CODEGEN,
             JULIA,
+            GPU_TRITON,
+            GPU_NEMO,
+            GPU_VLLM,
         ],
         default=None,
     )
@@ -313,7 +328,7 @@ _datasets = {
         TESTS_DATA_PATH, "10k_diabetes_sample.csv"
     ),
     (None, MULTICLASS_LABEL_SPACES): os.path.join(TESTS_DATA_PATH, "iris_with_spaces_full.csv"),
-    (SKLEARN, TEXT_GENERATION): os.path.join(TESTS_DATA_PATH, "prompts.csv"),
+    (PYTHON_TEXT_GENERATION, TEXT_GENERATION): os.path.join(TESTS_DATA_PATH, "prompts.csv"),
 }
 
 _training_models_paths = {
@@ -576,7 +591,7 @@ _class_labels = {
     (SKLEARN_PRED_CONSISTENCY, BINARY_BOOL): ["False", "True"],
     (MLJ, BINARY): ["Iris-setosa", "Iris-versicolor"],
     (MLJ, MULTICLASS): ["GALAXY", "QSO", "STAR"],
-    (SKLEARN, TEXT_GENERATION): None,
+    (PYTHON_TEXT_GENERATION, TEXT_GENERATION): None,
 }
 
 _artifacts = {
@@ -741,7 +756,7 @@ _artifacts = {
     (CUSTOM_TASK_INTERFACE_PYTORCH_MULTICLASS, MULTICLASS): None,
     (CUSTOM_TASK_INTERFACE_KERAS_REGRESSION, REGRESSION): None,
     (CUSTOM_TASK_INTERFACE_XGB_REGRESSION, REGRESSION): None,
-    (SKLEARN, TEXT_GENERATION): None,
+    (PYTHON_TEXT_GENERATION, TEXT_GENERATION): None,
 }
 
 _custom_filepaths = {
@@ -1120,3 +1135,10 @@ def mock_python_model_adapter_load_model_from_artifact():
 @pytest.fixture
 def endpoint_prediction_methods():
     return ["/predict/", "/predictions/", "/invocations"]
+
+
+@pytest.fixture
+def skip_if_running_inside_container():
+    skip = os.path.exists("/.dockerenv") or os.environ.get("KUBERNETES_SERVICE_HOST", None)
+    if skip:
+        pytest.skip("Tests are running inside container")
