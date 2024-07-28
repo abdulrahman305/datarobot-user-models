@@ -20,7 +20,7 @@ async-timeout==4.0.3
     # via aiohttp
 attrs==23.2.0
     # via aiohttp
-certifi==2024.2.2
+certifi==2024.7.4
     # via
     #   httpcore
     #   httpx
@@ -198,7 +198,7 @@ typing-extensions==4.11.0
     #   pydantic-core
 tzdata==2024.1
     # via pandas
-urllib3==1.26.18
+urllib3==1.26.19
     # via
     #   datarobot
     #   requests
@@ -212,5 +212,5 @@ werkzeug==3.0.1
     #   flask
 yarl==1.9.4
     # via aiohttp
-zipp==3.18.1
+zipp==3.19.1
     # via importlib-metadata
