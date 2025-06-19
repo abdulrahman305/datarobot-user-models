@@ -1,3 +1,4 @@
 -r requirements_test.txt
 dr-usertool>=3
 datarobot-bp-workshop==0.2.6
+urllib3>=2.5.0 # not directly required, pinned by Snyk to avoid a vulnerability
