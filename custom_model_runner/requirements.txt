@@ -24,3 +24,4 @@ pydantic
 datarobot-storage
 datarobot-mlops>=10.2.0  # Required for the 'set_api_spooler' with arugments
 datarobot>=3.1.0,<4
+urllib3>=2.5.0 # not directly required, pinned by Snyk to avoid a vulnerability
