@@ -1,5 +1,5 @@
 # This is the default base image for use with user models and workflows.
-ARG BASE_ROOT_IMAGE=python:3.11.11-slim-bookworm
+ARG BASE_ROOT_IMAGE=python:3.13.2-slim-bookworm
 
 FROM ${BASE_ROOT_IMAGE}
 
