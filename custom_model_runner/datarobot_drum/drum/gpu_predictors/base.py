@@ -46,6 +46,10 @@ from datarobot_drum.drum.language_predictors.base_language_predictor import (
 )
 from datarobot_drum.drum.root_predictors.drum_server_utils import DrumServerProcess
 from datarobot_drum.drum.server import HTTP_513_DRUM_PIPELINE_ERROR
+from datarobot_drum.drum.root_predictors.chat_helpers import is_openai_model
+
+
+logger = logging.getLogger(__name__)
 
 # OpenAI client isn't a required dependency for DRUM, so we need to check if it's available
 try:
@@ -54,6 +58,21 @@ try:
 
     COMPLETIONS_CREATE_SIGNATURE = inspect.signature(Completions.create)
     _HAS_OPENAI = True
+
+    try:
+        # disable "anonymous" tracking from traceloop
+        os.environ["TRACELOOP_TRACE_CONTENT"] = "false"
+        from opentelemetry.instrumentation.openai import OpenAIInstrumentor
+
+        OpenAIInstrumentor().instrument()
+    except (ImportError, ModuleNotFoundError):
+        msg = """Instrumentation for openai is not loaded, make sure appropriate
+        packages are installed:
+
+        pip install opentelemetry-instrumentation-openai
+        """
+        logger.warning(msg)
+
 except ImportError:
     _HAS_OPENAI = False
 
@@ -68,7 +87,7 @@ class BaseOpenAiGpuPredictor(BaseLanguagePredictor):
     NAME = "Generic OpenAI API"
     DEFAULT_MODEL_NAME = "datarobot-deployed-llm"
     MAX_RESTARTS = 10
-    HEALTH_ROUTE = "/"
+    DEFAULT_HEALTH_ROUTE = "/"
 
     def __init__(self):
         super().__init__()
@@ -80,6 +99,7 @@ class BaseOpenAiGpuPredictor(BaseLanguagePredictor):
         self.deployment_id = os.environ.get("MLOPS_DEPLOYMENT_ID", None)
 
         # server configuration is set in the Drop-in environment
+        self.health_route = self.DEFAULT_HEALTH_ROUTE
         self.openai_port = os.environ.get(EnvVarNames.OPENAI_PORT, "9999")
         self.openai_host = os.environ.get(EnvVarNames.OPENAI_HOST, "localhost")
         self.openai_process = None
@@ -135,11 +155,11 @@ class BaseOpenAiGpuPredictor(BaseLanguagePredictor):
             return default_name
 
     def supports_chat(self):
-        if self.target_type == TargetType.TEXT_GENERATION:
+        if self.target_type in [TargetType.TEXT_GENERATION, TargetType.AGENTIC_WORKFLOW]:
             return True
         return False
 
-    def _chat(self, completion_create_params, association_id):
+    def _chat(self, completion_create_params, association_id, **kwargs):
         # Use the `model` name provided by the caller. However, to maintain backward compatibility,
         # allow this field to be optional and fallback to the configured default model name if not provided.
         # If `datarobot-deployed-llm` is specified as the model, replace it with the corresponding actual model name.
@@ -152,6 +172,13 @@ class BaseOpenAiGpuPredictor(BaseLanguagePredictor):
         valid_kwargs = {k: v for k, v in completion_create_params.items() if k in valid_params}
         extra_kwargs = {k: v for k, v in completion_create_params.items() if k not in valid_params}
         return self.ai_client.chat.completions.create(**valid_kwargs, extra_body=extra_kwargs)
+
+    def _get_supported_llm_models(self):
+        result = {"object": "list", "data": []}
+        for model in self.ai_client.models.list():
+            if is_openai_model(model):
+                result["data"].append(model.to_dict())
+        return result
 
     def has_read_input_data_hook(self):
         return False
@@ -379,7 +406,7 @@ class BaseOpenAiGpuPredictor(BaseLanguagePredictor):
             return {"message": f"{self.NAME} has crashed."}, HTTP_513_DRUM_PIPELINE_ERROR
 
         try:
-            health_url = f"http://{self.openai_host}:{self.openai_port}{self.HEALTH_ROUTE}"
+            health_url = f"http://{self.openai_host}:{self.openai_port}{self.health_route}"
             response = requests.get(health_url, timeout=5)
             return {"message": response.text}, response.status_code
         except Timeout:

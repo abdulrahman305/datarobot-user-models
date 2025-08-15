@@ -1,4 +1,4 @@
-FROM vllm/vllm-openai:v0.8.3
+FROM vllm/vllm-openai:v0.10.0
 USER root
 RUN apt-get update && apt-get install -y \
     python3.12 \
@@ -37,5 +37,7 @@ WORKDIR ${CODE_DIR}
 COPY --chown=1000:0 ./*.sh ./*.py ${CODE_DIR}/
 
 ENV WITH_ERROR_SERVER=1
+ #This makes print statements show up in the logs API
+ENV PYTHONUNBUFFERED=1
 
 ENTRYPOINT ["/opt/code/start_server.sh"]

@@ -63,11 +63,8 @@ PERF_TEST_SERVER_LABEL = "__DRUM_PERF_TEST_SERVER__"
 CUSTOM_PY_CLASS_NAME = "CustomTask"
 
 MODERATIONS_LIBRARY_PACKAGE = "datarobot_dome"
-GUARD_HOOK = "drum_integration"
-GUARD_HOOK_MODULE = MODERATIONS_LIBRARY_PACKAGE + "." + GUARD_HOOK
-GUARD_INIT_HOOK_NAME = "init"
-GUARD_SCORE_WRAPPER_NAME = "guard_score_wrapper"
-GUARD_CHAT_WRAPPER_NAME = "guard_chat_wrapper"
+MODERATIONS_HOOK = "drum_integration"
+MODERATIONS_HOOK_MODULE = MODERATIONS_LIBRARY_PACKAGE + "." + MODERATIONS_HOOK
 
 LOG_LEVELS = {
     "all": logging.NOTSET,
@@ -93,9 +90,8 @@ class SupportedFrameworks:
     TORCH = "torch"
     KERAS = "keras"
     XGBOOST = "xgboost"
-    PYPMML = "pypmml"
     ONNX = "onnx"
-    ALL = [SKLEARN, TORCH, KERAS, XGBOOST, PYPMML, ONNX]
+    ALL = [SKLEARN, TORCH, KERAS, XGBOOST, ONNX]
 
 
 extra_deps = {
@@ -103,7 +99,6 @@ extra_deps = {
     SupportedFrameworks.TORCH: ["torch", "numpy", "scikit-learn", "scipy"],
     SupportedFrameworks.KERAS: ["scipy", "numpy", "h5py", "tensorflow>=2.2.1"],
     SupportedFrameworks.XGBOOST: ["scipy", "numpy", "xgboost"],
-    SupportedFrameworks.PYPMML: ["pypmml"],
     SupportedFrameworks.ONNX: ["onnxruntime"],
 }
 
@@ -118,6 +113,7 @@ class CustomHooks:
     POST_PROCESS = "post_process"
     FIT = "fit"
     CHAT = "chat"
+    GET_SUPPORTED_LLM_MODELS_LIST = "get_supported_llm_models"
 
     ALL_PREDICT_STRUCTURED = [
         INIT,
@@ -128,7 +124,11 @@ class CustomHooks:
         POST_PROCESS,
     ]
     ALL_PREDICT_UNSTRUCTURED = [INIT, LOAD_MODEL, SCORE_UNSTRUCTURED]
-    ALL_PREDICT_FIT_CHAT_STRUCTURED = ALL_PREDICT_STRUCTURED + [FIT, CHAT]
+    ALL_PREDICT_FIT_CHAT_STRUCTURED = ALL_PREDICT_STRUCTURED + [
+        FIT,
+        CHAT,
+        GET_SUPPORTED_LLM_MODELS_LIST,
+    ]
 
 
 class UnstructuredDtoKeys:
@@ -187,14 +187,12 @@ class PythonArtifacts:
     TORCH_EXTENSION = ".pth"
     KERAS_EXTENSION = ".h5"
     JOBLIB_EXTENSION = ".joblib"
-    PYPMML_EXTENSION = ".pmml"
     ONNX_EXTENSION = ".onnx"
     ALL = [
         PKL_EXTENSION,
         TORCH_EXTENSION,
         KERAS_EXTENSION,
         JOBLIB_EXTENSION,
-        PYPMML_EXTENSION,
         ONNX_EXTENSION,
     ]
 
@@ -391,6 +389,7 @@ class TargetType(Enum):
     TEXT_GENERATION = "textgeneration"
     GEO_POINT = "geopoint"
     VECTOR_DATABASE = "vectordatabase"
+    AGENTIC_WORKFLOW = "agenticworkflow"
 
     def is_classification(self):
         return self in [self.BINARY, self.MULTICLASS]
@@ -402,6 +401,7 @@ class TargetType(Enum):
             self.TEXT_GENERATION,
             self.GEO_POINT,
             self.VECTOR_DATABASE,
+            self.AGENTIC_WORKFLOW,
         ]
 
 

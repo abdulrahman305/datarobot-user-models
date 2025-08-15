@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import random
+import shutil
 import sys
 from dataclasses import dataclass
 
@@ -40,12 +41,10 @@ from datarobot_drum.custom_task_interfaces.user_secrets import (
 from datarobot_drum.drum.adapters.model_adapters.python_model_adapter import PythonModelAdapter
 from datarobot_drum.drum.enum import (
     TargetType,
-    GUARD_SCORE_WRAPPER_NAME,
-    GUARD_CHAT_WRAPPER_NAME,
-    GUARD_HOOK,
+    MODERATIONS_HOOK,
+    MODERATIONS_HOOK_MODULE,
     MODERATIONS_LIBRARY_PACKAGE,
     CustomHooks,
-    GUARD_HOOK_MODULE,
 )
 from datarobot_drum.drum.exceptions import DrumCommonException
 
@@ -564,140 +563,234 @@ class TestPythonModelAdapterInitialization:
         with pytest.raises(ValueError, match="Unexpected empty target name"):
             PythonModelAdapter(Mock(), TargetType.VECTOR_DATABASE)
 
+    def test_valid_initialization_for_agentic_workflow(self):
+        target_name = "Response"
+        with patch.dict(os.environ, {"TARGET_NAME": target_name}):
+            adapter = PythonModelAdapter(Mock(), TargetType.AGENTIC_WORKFLOW)
+            assert adapter._target_name == target_name
+
+    def test_invalid_initialization_for_agentic_workflow(self):
+        os.environ.pop("TARGET_NAME", None)
+        with pytest.raises(ValueError, match="Unexpected empty target name"):
+            PythonModelAdapter(Mock(), TargetType.AGENTIC_WORKFLOW)
+
+
+def set_moderations_lib_content(path: Path, content: str):
+    # Create dummy datarobot dome package with the drum_integration.py
+    mod_dir = path / MODERATIONS_LIBRARY_PACKAGE
+    mod_dir.mkdir(parents=True, exist_ok=True)
+    mod_init_py = mod_dir / "__init__.py"
+    mod_init_py.touch(exist_ok=True)
+    mod_hook_file = mod_dir / f"{MODERATIONS_HOOK}.py"
+    mod_hook_file.write_text(content)
+
+
+def remove_moderations_lib_content(path: Path):
+    """Removes the moderations subdirectory from the specified path."""
+    mod_dir = path / MODERATIONS_LIBRARY_PACKAGE
+    if not mod_dir.exists() or not mod_dir.is_dir():
+        return
+
+    shutil.rmtree(mod_dir)
+
+
+def alternate_case(s: str) -> str:
+    """Utility to alternate the case of the provided string."""
+    return "".join([char.upper() if idx % 2 == 0 else char.lower() for idx, char in enumerate(s)])
+
+
+def build_chat_completion(message):
+    """Builds a chat completion from the provide message"""
+    return ChatCompletion(
+        id="id",
+        choices=[
+            Choice(
+                finish_reason="stop",
+                index=0,
+                message=ChatCompletionMessage(role="assistant", content=message),
+            )
+        ],
+        created=123,
+        model="model",
+        object="chat.completion",
+    )
+
+
+def score_alt_case(data, model, **kwargs):
+    """Dummy score method -- alternate case to verify it is called"""
+    data["completion"] = pd.array([alternate_case(s) for s in data["text"].array])
+    return data
+
+
+def score_pass(data, model, **kwargs):
+    """Dummy score method -- pass through unchanged"""
+    return data
+
+
+def chat_alt_case(completion_create_params, model, association_id=None):
+    """Dummy chat method -- alternate case to verify it is called"""
+    text = alternate_case(completion_create_params["messages"][-1]["content"])
+    return build_chat_completion(text)
+
+
+def chat_pass(completion_create_params, model, association_id=None):
+    """Dummy chat method -- pass through text unchanged"""
+    text = completion_create_params["messages"][-1]["content"]
+    return build_chat_completion(text)
+
+
+@contextlib.contextmanager
+def mock_moderation_content(path: Path, content: str):
+    """
+    Sets the moderations content in the provided path, makes adjustments to find it, and
+    cleans up the files and modules following test execution.
+    """
+
+    # remove any currently loaded moderations libraries
+    sys.modules.pop(MODERATIONS_HOOK_MODULE, None)
+    sys.modules.pop(MODERATIONS_LIBRARY_PACKAGE, None)
+
+    # put provided path in the search path for modules
+    sys.path.insert(0, str(path))
+
+    # set the content to the provided value
+    set_moderations_lib_content(path, content)
+    try:
+        yield  # let the test run here
+    finally:
+        # remove the moderations subdirectory and remove it from search path
+        remove_moderations_lib_content(path)
+        sys.path.remove(str(path))
+
+        # unload any moderation modules, so they don't get used by another test
+        sys.modules.pop(MODERATIONS_HOOK_MODULE, None)
+        sys.modules.pop(MODERATIONS_LIBRARY_PACKAGE, None)
+
+
+class TestModerationPipeline:
+    """Mocks the moderations pipeline to test interactions with DRUM."""
+
+    def __init__(self, *args, **kwargs):
+        self.score_call_count = 0
+        self.chat_call_count = 0
+
+    def score(self, input_df: pd.DataFrame, model, drum_score_fn, **kwargs):
+        """Score function turns the completions to uppercase and runs the DRUM score function."""
+        self.score_call_count += 1
+        input_df["completion"] = input_df["text"].str.upper()
+        return drum_score_fn(input_df, model, **kwargs)
+
+    def chat(
+        self,
+        completion_create_params,
+        model,
+        drum_chat_fn,
+        association_id: str = None,
+        **kwargs,
+    ):
+        """Chat function turns the message to uppercase and runs the DRUM chat function."""
+        self.chat_call_count += 1
+        prompt = completion_create_params["messages"][-1]["content"].upper()
+        completion_create_params["messages"][-1]["content"] = prompt
+        return drum_chat_fn(completion_create_params, model)
+
 
 class TestPythonModelAdapterWithGuards:
     """Use cases to test the moderation integration with DRUM"""
 
-    def test_loading_guard_hook_module(self, tmp_path):
-        guard_hook_contents = """
+    @pytest.mark.parametrize(
+        ["target_type"],
+        [
+            pytest.param(TargetType.TEXT_GENERATION, id="textgen"),
+            pytest.param(TargetType.AGENTIC_WORKFLOW, id="agentic"),
+            pytest.param(TargetType.VECTOR_DATABASE, id="vectordb"),
+        ],
+    )
+    def test_loading_moderations_pipeline(self, target_type, tmp_path):
+        moderation_content = f"""
         from unittest.mock import Mock
+        import os
 
-        def guard_score_wrapper(data, model, pipeline, drum_score_fn, **kwargs):
-            return data
-
-        def init():
+        def moderation_pipeline_factory(target_type, model_dir=os.getcwd()):
+            assert model_dir == \"{str(tmp_path)}\"
             return Mock()
         """
-        sys.path.insert(0, str(tmp_path))
-        # Create dummy datarobot dome package
-        guard_package_path = tmp_path / MODERATIONS_LIBRARY_PACKAGE
-        guard_package_init_py = guard_package_path / "__init__.py"
-
-        # And the guard hook file to it
-        guard_hook_filename = guard_package_path / f"{GUARD_HOOK}.py"
-        if not os.path.exists(guard_package_path):
-            guard_package_path.mkdir(parents=True)
-            guard_package_init_py.touch(exist_ok=True)
-        guard_hook_filename.write_text(textwrap.dedent(guard_hook_contents))
-
-        text_generation_target_name = "completion"
-        with patch.dict(os.environ, {"TARGET_NAME": text_generation_target_name}):
-            # Remove any existing cached imports to allow importing the fake guard package.
-            # Existing imports will be there if real moderations library is in python path.
-            sys.modules.pop(GUARD_HOOK_MODULE, None)
-            sys.modules.pop(MODERATIONS_LIBRARY_PACKAGE, None)
-
-            adapter = PythonModelAdapter(tmp_path, TargetType.TEXT_GENERATION)
-            assert adapter._guard_pipeline is not None
-            # Ensure that it is Mock as set by guard_hook_contents
-            assert isinstance(adapter._guard_pipeline, Mock)
-
-        sys.path.remove(str(tmp_path))
-
-    @pytest.mark.parametrize(
-        "guard_hook_present, expected_predictions",
-        [(True, np.array([["ABC"], ["DEF"]])), (False, np.array([["abc"], ["def"]]))],
-    )
-    def test_invoking_guard_hook_score_wrapper(
-        self, tmp_path, guard_hook_present, expected_predictions
-    ):
-        def guard_score_wrapper(data, model, pipeline, drum_score_fn, **kwargs):
-            data["completion"] = data["text"].str.upper()
-            return data
-
-        def custom_score(data, model, **kwargs):
-            """Dummy score method just for the purpose of unit test"""
-            return data
-
-        data = bytes(pd.DataFrame({"text": ["abc", "def"]}).to_csv(index=False), encoding="utf-8")
-        text_generation_target_name = "completion"
-        with patch.dict(os.environ, {"TARGET_NAME": text_generation_target_name}):
-            adapter = PythonModelAdapter(tmp_path, TargetType.TEXT_GENERATION)
-            if guard_hook_present:
-                adapter._guard_pipeline = Mock()
-                adapter._guard_moderation_hooks = {GUARD_SCORE_WRAPPER_NAME: guard_score_wrapper}
-            adapter._custom_hooks["score"] = custom_score
-            response = adapter.predict(binary_data=data)
-            # If the guard score wrapper is invoked, completion will be upper case letters
-            # (as defined), else they will be lower case letters.
-            assert np.alltrue(response.predictions == expected_predictions)
-
-    @staticmethod
-    def _build_chat_completion(message):
-        return ChatCompletion(
-            id="id",
-            choices=[
-                Choice(
-                    finish_reason="stop",
-                    index=0,
-                    message=ChatCompletionMessage(role="assistant", content=message),
-                )
-            ],
-            created=123,
-            model="model",
-            object="chat.completion",
-        )
-
-    @staticmethod
-    def custom_chat(completion_create_params, model):
-        """Dummy chat method just for the purpose of unit test"""
-        return TestPythonModelAdapterWithGuards._build_chat_completion(
-            completion_create_params["messages"][-1]["content"]
-        )
-
-    @pytest.mark.parametrize(
-        "guard_hook_present, expected_completion",
-        [(True, "HELLO THERE"), (False, "Hello there")],
-    )
-    def test_invoking_guard_hook_chat_wrapper(
-        self, tmp_path, guard_hook_present, expected_completion
-    ):
-        def guard_chat_wrapper(
-            completion_create_params, model, pipeline, drum_chat_fn, association_id
+        target_name = "completion"
+        with (
+            patch.dict(os.environ, {"TARGET_NAME": target_name}),
+            mock_moderation_content(tmp_path, textwrap.dedent(moderation_content)),
         ):
-            prompt = completion_create_params["messages"][-1]["content"]
-            return self._build_chat_completion(prompt.upper())
+            adapter = PythonModelAdapter(tmp_path, target_type)
+            assert adapter._mod_pipeline is not None
 
+    def test_vdb_moderation_pipeline(self, tmp_path):
+        df = pd.DataFrame({"text": ["abc", "def"]})
+        data = bytes(df.to_csv(index=False), encoding="utf-8")
+        target_name = "completion"
+        with patch.dict(os.environ, {"TARGET_NAME": target_name}):
+            adapter = PythonModelAdapter(tmp_path, TargetType.VECTOR_DATABASE)
+            adapter._mod_pipeline = TestModerationPipeline()
+            adapter._custom_hooks["score"] = score_pass
+
+            result = adapter.predict(binary_data=data)
+            assert result is not None
+            assert adapter._mod_pipeline.score_call_count == 1
+
+    @pytest.mark.parametrize(
+        ["pipeline_present", "score_fn", "pipeline_count", "expected_predictions"],
+        [
+            pytest.param(True, score_pass, 1, np.array([["ABC"], ["DEF"]]), id="all-pass"),
+            pytest.param(False, score_pass, 0, np.array([["abc"], ["def"]]), id="no-pipe-pass"),
+            pytest.param(True, score_alt_case, 1, np.array([["AbC"], ["DeF"]]), id="all-alt"),
+            pytest.param(False, score_alt_case, 0, np.array([["AbC"], ["DeF"]]), id="no-pipe-alt"),
+        ],
+    )
+    def test_llm_moderation_pipeline_score(
+        self, tmp_path, pipeline_present, score_fn, pipeline_count, expected_predictions
+    ):
+        df = pd.DataFrame({"text": ["abc", "def"]})
+        data = bytes(df.to_csv(index=False), encoding="utf-8")
+        target_name = "completion"
+        with patch.dict(os.environ, {"TARGET_NAME": target_name}):
+            adapter = PythonModelAdapter(tmp_path, TargetType.TEXT_GENERATION)
+            if pipeline_present:
+                adapter._mod_pipeline = TestModerationPipeline()
+            # NOTE: without score hook present, uses a legacy path (that is not setup)
+            adapter._custom_hooks["score"] = score_fn
+
+            response = adapter.predict(binary_data=data)
+            assert np.all(response.predictions == expected_predictions)
+            assert pipeline_count == (
+                adapter._mod_pipeline.score_call_count if adapter._mod_pipeline else 0
+            )
+
+    @pytest.mark.parametrize(
+        ["pipeline_present", "chat_fn", "pipeline_count", "expected_completion"],
+        [
+            pytest.param(True, chat_pass, 1, "HELLO THERE", id="all-pass"),
+            pytest.param(False, chat_pass, 0, "Hello there", id="no-pipe-pass"),
+            pytest.param(True, chat_alt_case, 1, "HeLlO ThErE", id="all-alt"),
+            pytest.param(False, chat_alt_case, 0, "HeLlO ThErE", id="no-pipe-alt"),
+        ],
+    )
+    def test_llm_moderation_pipeline_chat(
+        self, tmp_path, pipeline_present, chat_fn, pipeline_count, expected_completion
+    ):
         messages = [
             {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user", "content": "Hello there"},
         ]
-        text_generation_target_name = "completion"
-        with patch.dict(os.environ, {"TARGET_NAME": text_generation_target_name}):
+        target_name = "completion"
+        with patch.dict(os.environ, {"TARGET_NAME": target_name}):
             adapter = PythonModelAdapter(tmp_path, TargetType.TEXT_GENERATION)
-            if guard_hook_present:
-                adapter._guard_pipeline = Mock()
-                adapter._guard_moderation_hooks = {GUARD_CHAT_WRAPPER_NAME: guard_chat_wrapper}
-            adapter._custom_hooks["chat"] = self.custom_chat
-            response = adapter.chat({"messages": messages}, None, "association_id")
-            # If the guard score wrapper is invoked, completion will be upper case letters
-            # (as defined), else they will be lower case letters.
-            assert response.choices[0].message.content == expected_completion
+            if pipeline_present:
+                adapter._mod_pipeline = TestModerationPipeline()
+            adapter._custom_hooks["chat"] = chat_fn
 
-    def test_guard_chat_wrapper_not_invoked_if_not_defined(self, tmp_path):
-        # Backward compatibility if new drum using old moderation library
-        messages = [
-            {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": "Hello there"},
-        ]
-        text_generation_target_name = "completion"
-        with patch.dict(os.environ, {"TARGET_NAME": text_generation_target_name}):
-            adapter = PythonModelAdapter(tmp_path, TargetType.TEXT_GENERATION)
-            # Moderation library is present, but with guard chat hook
-            adapter._guard_pipeline = Mock()
-            adapter._guard_moderation_hooks = {GUARD_CHAT_WRAPPER_NAME: None}
-            adapter._custom_hooks["chat"] = self.custom_chat
             response = adapter.chat({"messages": messages}, None, "association_id")
             # Even if guard pipeline exists - moderation chat wrapper does not exist, so invoke
             # only user chat method
-            assert response.choices[0].message.content == "Hello there"
+            assert response.choices[0].message.content == expected_completion
+            assert pipeline_count == (
+                adapter._mod_pipeline.chat_call_count if adapter._mod_pipeline else 0
+            )

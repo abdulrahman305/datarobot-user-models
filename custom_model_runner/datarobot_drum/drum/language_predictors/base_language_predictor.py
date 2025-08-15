@@ -33,8 +33,14 @@ from datarobot_drum.drum.data_marshalling import marshal_predictions
 from datarobot_drum.drum.root_predictors.chat_helpers import is_streaming_response
 
 import datarobot as dr
+from datarobot_mlops.common.connected_exception import DRMLOpsConnectedException
 
 DEFAULT_PROMPT_COLUMN_NAME = "promptText"
+EXCEPTION_422 = "predictionInputs/fromJSON/: 422 Client Error: UNPROCESSABLE ENTITY for url"
+DRIFT_ERROR_MESSAGE = (
+    "Feature Drift tracking and predictions data collection are disabled. Enable feature drift "
+    "tracking or predictions data collection from deployment settings first, to post features"
+)
 
 logger = logging.getLogger(LOGGER_NAME_PREFIX + "." + __name__)
 
@@ -179,6 +185,7 @@ class BaseLanguagePredictor(DrumClassLabelAdapter, ABC):
                 mlops_service_url=self._params["external_webserver_url"],
                 mlops_api_token=self._params["api_token"],
             )
+            self._mlops.set_async_reporting()
 
     def get_prompt_column_name(self):
         if not self._params.get("deployment_id", None):
@@ -248,11 +255,11 @@ class BaseLanguagePredictor(DrumClassLabelAdapter, ABC):
         """Predict on input_filename or binary_data"""
         pass
 
-    def chat(self, completion_create_params):
+    def chat(self, completion_create_params, **kwargs):
         start_time = time.time()
         try:
             association_id = str(uuid4_fast())
-            response = self._chat(completion_create_params, association_id)
+            response = self._chat(completion_create_params, association_id, **kwargs)
             response = self._validate_chat_response(response)
         except Exception as e:
             self._mlops_report_error(start_time)
@@ -265,6 +272,7 @@ class BaseLanguagePredictor(DrumClassLabelAdapter, ABC):
                 response.choices[0].message.content,
                 association_id,
             )
+            setattr(response, "datarobot_association_id", association_id)
             return response
         else:
 
@@ -274,6 +282,7 @@ class BaseLanguagePredictor(DrumClassLabelAdapter, ABC):
                     for chunk in response:
                         if chunk.choices and chunk.choices[0].delta.content:
                             message_content.append(chunk.choices[0].delta.content)
+                        setattr(chunk, "datarobot_association_id", association_id)
                         yield chunk
                 except Exception:
                     self._mlops_report_error(start_time)
@@ -285,7 +294,13 @@ class BaseLanguagePredictor(DrumClassLabelAdapter, ABC):
 
             return generator()
 
-    def _chat(self, completion_create_params, association_id):
+    def get_supported_llm_models(self):
+        return self._get_supported_llm_models()
+
+    def _get_supported_llm_models(self):
+        raise NotImplementedError("GET /models (get_models) is not implemented ")
+
+    def _chat(self, completion_create_params, association_id, **kwargs):
         raise NotImplementedError("Chat is not implemented ")
 
     def _mlops_report_chat_prediction(
@@ -331,6 +346,11 @@ class BaseLanguagePredictor(DrumClassLabelAdapter, ABC):
                 predictions,
                 association_ids=[association_id],
             )
+        except DRMLOpsConnectedException as e:
+            exception_string = str(e)
+            if EXCEPTION_422 in exception_string and DRIFT_ERROR_MESSAGE in exception_string:
+                logger.warning(exception_string)
+                return
         except DRCommonException:
             logger.exception("Failed to report predictions data")
 

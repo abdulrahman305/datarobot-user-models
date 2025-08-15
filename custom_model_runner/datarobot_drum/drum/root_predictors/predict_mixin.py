@@ -162,6 +162,7 @@ class PredictMixin:
                 TargetType.TEXT_GENERATION,
                 TargetType.GEO_POINT,
                 TargetType.VECTOR_DATABASE,
+                TargetType.AGENTIC_WORKFLOW,
             ):
                 # float32 is not JSON serializable, so cast to float, which is float64
                 predict_response.predictions = predict_response.predictions.astype("float")
@@ -384,7 +385,7 @@ class PredictMixin:
         # _predictor is a BaseLanguagePredictor attribute of PredictionServer;
         # see PredictionServer.__init__()
         if not self._predictor.supports_chat():
-            if self._target_type == TargetType.TEXT_GENERATION:
+            if self._target_type in [TargetType.TEXT_GENERATION, TargetType.AGENTIC_WORKFLOW]:
                 message = undefined_chat_message
             else:
                 message = unsupported_chat_message
@@ -395,8 +396,9 @@ class PredictMixin:
             )
 
         completion_create_params = request.json
+        headers = request.headers
 
-        result = self._predictor.chat(completion_create_params)
+        result = self._predictor.chat(completion_create_params, headers=headers)
         if not is_streaming_response(result):
             response = result.to_dict()
         else:
@@ -406,6 +408,17 @@ class PredictMixin:
             )
 
         return response, HTTP_200_OK
+
+    def get_supported_llm_models(self, logger=None):
+        if self._target_type != TargetType.TEXT_GENERATION:
+            message = "get_supported_llm_models is supported only for TextGen models"
+            self._log_if_possible(logger, logging.WARNING, message)
+            return (
+                {"message": "ERROR: " + message},
+                HTTP_404_NOT_FOUND,
+            )
+        result = self._predictor.get_supported_llm_models()
+        return result, HTTP_200_OK
 
     def do_transform(self, logger=None):
         if self._target_type != TargetType.TRANSFORM:

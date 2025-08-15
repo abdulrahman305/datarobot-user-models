@@ -3,9 +3,19 @@
   "name": "[DataRobot] Java Drop-In (DR Codegen, H2O)",
   "description": "This template can be used as an environment for DataRobot generated scoring code or models that implement the either the IClassificationPredictor or IRegressionPredictor interface from the datarobot-prediction package and for H2O models exported as POJO or MOJO.",
   "programmingLanguage": "java",
-  "environmentVersionId": "67d933f6d3381d60db7ef899",
+  "label": "",
+  "environmentVersionId": "689b9c1b0056193d330033b3",
+  "environmentVersionDescription": "",
   "isPublic": true,
+  "isDownloadable": true,
   "useCases": [
     "customModel"
+  ],
+  "contextUrl": "https://github.com/datarobot/datarobot-user-models/tree/master/public_dropin_environments/java_codegen",
+  "imageRepository": "env-java-codegen",
+  "tags": [
+    "v11.2.0-689b9c1b0056193d330033b3",
+    "689b9c1b0056193d330033b3",
+    "v11.2.0-latest"
   ]
 }

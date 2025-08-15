@@ -6,7 +6,6 @@ Released under the terms of DataRobot Tool and Utility Agreement.
 """
 import contextlib
 import copy
-import glob
 import json
 import logging
 import os
@@ -17,7 +16,6 @@ import subprocess
 import sys
 import tempfile
 import time
-from distutils.dir_util import copy_tree
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Callable, Optional
@@ -468,6 +466,7 @@ class CMRunner:
             if self.options.docker and (
                 self.run_mode not in (RunMode.PUSH, RunMode.PERF_TEST, RunMode.VALIDATION)
             ):
+                self._check_docker_drum_version(self.options)
                 ret = self._run_inside_docker(self.options, self.run_mode, self.raw_arguments)
                 if ret:
                     raise DrumCommonException("Error from docker process: {}".format(ret))
@@ -802,10 +801,7 @@ class CMRunner:
 
         return DrumUtils.render_file(functional_pipeline_filepath, replace_data)
 
-    def _run_predictions(self, stats_collector: Optional[StatsCollector] = None):
-        if self.run_mode not in [RunMode.SCORE, RunMode.SERVER]:
-            raise NotImplemented(f"The given run mode is supported here: {self.run_mode}")
-
+    def get_predictor_params(self):
         run_language = self._check_artifacts_and_get_run_language()
         infra_pipeline_str = self._prepare_prediction_server_or_batch_pipeline(run_language)
 
@@ -814,12 +810,17 @@ class CMRunner:
             raise DrumCommonException("Pipeline is empty")
         if "arguments" not in pipeline["pipe"][0]:
             raise DrumCommonException("Arguments are missing in the pipeline")
+        return pipeline["pipe"][0]["arguments"]
+
+    def _run_predictions(self, stats_collector: Optional[StatsCollector] = None):
+        if self.run_mode not in [RunMode.SCORE, RunMode.SERVER]:
+            raise NotImplemented(f"The given run mode is supported here: {self.run_mode}")
 
         self.logger.info(
             f">>> Start {ArgumentsOptions.MAIN_COMMAND} in the {self.run_mode.value} mode"
         )
 
-        params = pipeline["pipe"][0]["arguments"]
+        params = self.get_predictor_params()
         predictor = None
         try:
             if stats_collector:
@@ -986,10 +987,12 @@ class CMRunner:
         self._print_verbose("docker command: <{}>".format(docker_cmd))
         return docker_cmd
 
-    def _run_inside_docker(self, options, run_mode, raw_arguments):
-        self._check_artifacts_and_get_run_language()
-        docker_cmd_lst = self._prepare_docker_command(options, run_mode, raw_arguments)
+    def _check_docker_drum_version(self, options) -> None:
+        """
+        Checks that the drum version installed inside the container matches current.
 
+        It is not a fatal problem if versions don't match -- just a warning.
+        """
         self._print_verbose("Checking DRUM version in container...")
         result = subprocess.run(
             [
@@ -1011,7 +1014,11 @@ class CMRunner:
         container_drum_version = " ".join(container_drum_version.split())
 
         host_drum_version = "{} {}".format(ArgumentsOptions.MAIN_COMMAND, drum_version)
-        if container_drum_version != host_drum_version:
+        if result.returncode != 0:
+            print(f"Unable to determine DRUM version in {options.docker}")
+            error_info = result.stderr.decode("utf8", errors="ignore")
+            self.logger.info(f"{options.docker} failed to get version: {error_info}")
+        elif container_drum_version != host_drum_version:
             print(
                 "WARNING: looks like host DRUM version doesn't match container DRUM version. This can lead to unexpected behavior.\n"
                 "Host DRUM version: {}\n"
@@ -1025,6 +1032,15 @@ class CMRunner:
             self._print_verbose(
                 "Host DRUM version matches container DRUM version: {}".format(host_drum_version)
             )
+
+        return
+
+    def _run_inside_docker(self, options, run_mode, raw_arguments):
+        """Runs the drum command inside the provided container."""
+        self._check_artifacts_and_get_run_language()
+        docker_cmd_lst = self._prepare_docker_command(options, run_mode, raw_arguments)
+
+        self.logger.info(" ".join(docker_cmd_lst))
         self._print_verbose("-" * 20)
         p = subprocess.Popen(docker_cmd_lst)
         try:
@@ -1193,35 +1209,74 @@ class CMRunner:
         json.dump(report_information, open(output_path, "w"))
 
 
-def output_in_code_dir(code_dir, output_dir):
-    """Does the code directory house the output directory?"""
-    code_abs_path = os.path.abspath(code_dir)
-    output_abs_path = os.path.abspath(output_dir)
-    return os.path.commonpath([code_dir, output_abs_path]) == code_abs_path
+def _output_in_code_dir(code_dir: Path, output_dir: Path) -> bool:
+    """Return True if output_dir is inside code_dir."""
+    try:
+        output_dir.resolve().relative_to(code_dir.resolve())
+        return True
+    except ValueError:
+        return False
 
 
-def create_custom_inference_model_folder(code_dir, output_dir):
-    readme = """
-    This folder was generated by the DRUM tool. It provides functionality for making
-    predictions using the model trained by DRUM
+def _copy_tree(src_dir: Path, dst_dir: Path) -> set[Path]:
     """
-    files_in_output = set(glob.glob(output_dir + "/**"))
-    if output_in_code_dir(code_dir, output_dir):
-        # since the output directory is in the code directory use a tempdir to copy into first and
-        # cleanup files and prevent errors related to copying the output into itself.
-        with tempfile.TemporaryDirectory() as tempdir:
-            copy_tree(code_dir, tempdir)
-            # remove the temporary version of the target dir
-            shutil.rmtree(os.path.join(tempdir, os.path.relpath(output_dir, code_dir)))
-            shutil.rmtree(os.path.join(tempdir, "__pycache__"), ignore_errors=True)
-            copied_files = set(copy_tree(tempdir, output_dir))
+    Recursively copy contents of src_dir into dst_dir.
+    Returns a set of all copied file paths.
+    """
+    copied_files = set()
+    dst_dir.mkdir(parents=True, exist_ok=True)
+
+    for item in src_dir.iterdir():
+        dst_item = dst_dir / item.name
+        if item.is_dir():
+            shutil.copytree(item, dst_item, dirs_exist_ok=True)
+            copied_files.update(p for p in dst_item.rglob("*") if p.is_file())
+        else:
+            shutil.copy2(item, dst_item)
+            copied_files.add(dst_item)
+
+    return copied_files
+
+
+def create_custom_inference_model_folder(code_dir: str, output_dir: str) -> None:
+    """
+    Prepares a model inference folder by copying code_dir into output_dir,
+    avoiding recursive self-copying if output_dir is inside code_dir.
+    """
+    code_path = Path(code_dir).resolve()
+    output_path = Path(output_dir).resolve()
+
+    readme_content = (
+        "This folder was generated by the DRUM tool. It provides functionality for making\n"
+        "predictions using the model trained by DRUM\n"
+    )
+
+    existing_files = set(p for p in output_path.rglob("*") if p.is_file())
+
+    if _output_in_code_dir(code_path, output_path):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            _copy_tree(code_path, tmp_path)
+
+            # Remove the output subdir inside the copied tree
+            rel_output = output_path.relative_to(code_path)
+            shutil.rmtree(tmp_path / rel_output, ignore_errors=True)
+
+            # Clean up __pycache__
+            shutil.rmtree(tmp_path / "__pycache__", ignore_errors=True)
+
+            copied_files = _copy_tree(tmp_path, output_path)
     else:
-        copied_files = set(copy_tree(code_dir, output_dir))
-        shutil.rmtree(os.path.join(output_dir, "__pycache__"), ignore_errors=True)
-    with open(os.path.join(output_dir, "README.md"), "w") as fp:
-        fp.write(readme)
-    if files_in_output & copied_files:
-        print("Files were overwritten: {}".format(files_in_output & copied_files))
+        copied_files = _copy_tree(code_path, output_path)
+        shutil.rmtree(output_path / "__pycache__", ignore_errors=True)
+
+    # Add README
+    (output_path / "README.md").write_text(readme_content)
+
+    # Check overwritten files
+    overwritten = existing_files & copied_files
+    if overwritten:
+        print(f"Files were overwritten: {sorted(overwritten)}")
 
 
 def _get_default_numeric_param_value(param_config: Dict, cast_to_int: bool) -> Union[int, float]:

@@ -4,6 +4,7 @@ All rights reserved.
 This is proprietary source code of DataRobot, Inc. and its affiliates.
 Released under the terms of DataRobot Tool and Utility Agreement.
 """
+
 from datarobot_drum.drum.lazy_loading.lazy_loading_handler import LazyLoadingHandler
 
 #!/usr/bin/env python3
@@ -42,15 +43,13 @@ import os
 import signal
 import sys
 
-from datarobot_drum.drum.args_parser import CMRunnerArgsRegistry
-from datarobot_drum.drum.common import config_logging
+from datarobot_drum.drum.common import config_logging, setup_otel
+from datarobot_drum.drum.utils.setup import setup_options
 from datarobot_drum.drum.enum import RunMode
 from datarobot_drum.drum.enum import ExitCodes
 from datarobot_drum.drum.exceptions import DrumSchemaValidationException
 from datarobot_drum.drum.runtime import DrumRuntime
-from datarobot_drum.runtime_parameters.exceptions import RuntimeParameterException
 from datarobot_drum.runtime_parameters.runtime_parameters import (
-    RuntimeParametersLoader,
     RuntimeParameters,
 )
 
@@ -68,31 +67,24 @@ def main():
             if runtime.options and RunMode(runtime.options.subparser_name) == RunMode.SERVER:
                 if runtime.cm_runner:
                     runtime.cm_runner.terminate()
+            # Let traceer offload accumulated spans before shutdown.
+            if runtime.trace_provider is not None:
+                runtime.trace_provider.shutdown()
+            if runtime.metric_provider is not None:
+                runtime.metric_provider.shutdown()
 
             os._exit(130)
 
-        arg_parser = CMRunnerArgsRegistry.get_arg_parser()
-
         try:
-            import argcomplete
-        except ImportError:
-            print(
-                "WARNING: autocompletion of arguments is not supported "
-                "as 'argcomplete' package is not found",
-                file=sys.stderr,
-            )
-        else:
-            # argcomplete call should be as close to the beginning as possible
-            argcomplete.autocomplete(arg_parser)
+            options = setup_options()
+            runtime.options = options
+        except Exception as exc:
+            print(str(exc))
+            exit(255)
 
-        CMRunnerArgsRegistry.extend_sys_argv_with_env_vars()
-
-        options = arg_parser.parse_args()
-        CMRunnerArgsRegistry.verify_options(options)
-        _setup_required_environment_variables(options)
-        if RuntimeParameters.has("CUSTOM_MODEL_WORKERS"):
-            options.max_workers = RuntimeParameters.get("CUSTOM_MODEL_WORKERS")
-        runtime.options = options
+        trace_provider, metric_provider = setup_otel(RuntimeParameters, options)
+        runtime.trace_provider = trace_provider
+        runtime.metric_provider = metric_provider
 
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
@@ -104,25 +96,6 @@ def main():
             runtime.cm_runner.run()
         except DrumSchemaValidationException:
             sys.exit(ExitCodes.SCHEMA_VALIDATION_ERROR.value)
-
-
-def _setup_required_environment_variables(options):
-    if "runtime_params_file" in options and options.runtime_params_file:
-        try:
-            loader = RuntimeParametersLoader(options.runtime_params_file, options.code_dir)
-            loader.setup_environment_variables()
-        except RuntimeParameterException as exc:
-            print(str(exc))
-            exit(255)
-
-    if "lazy_loading_file" in options and options.lazy_loading_file:
-        try:
-            LazyLoadingHandler.setup_environment_variables_from_values_file(
-                options.lazy_loading_file
-            )
-        except Exception as exc:
-            print(str(exc))
-            exit(255)
 
 
 if __name__ == "__main__":

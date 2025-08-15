@@ -55,7 +55,6 @@ from tests.constants import (
     NO_CUSTOM,
     ONNX,
     POJO,
-    PYPMML,
     PYTHON,
     PYTHON_LOAD_MODEL,
     PYTHON_PREDICT_SPARSE,
@@ -90,6 +89,8 @@ from tests.constants import (
     R,
     PYTHON_VECTOR_DATABASE,
     VECTOR_DATABASE,
+    PYTHON_AGENTIC_WORKFLOW,
+    AGENTIC_WORKFLOW,
     PYTHON311,
     REPO_ROOT_PATH,
 )
@@ -146,16 +147,13 @@ class TestInference:
             (MOJO, MULTICLASS, NO_CUSTOM, None, False),
             (MOJO, MULTICLASS_BINARY, NO_CUSTOM, None, False),
             (MULTI_ARTIFACT, REGRESSION, PYTHON_LOAD_MODEL, None, False),
-            (PYPMML, REGRESSION, NO_CUSTOM, None, False),
-            (PYPMML, BINARY, NO_CUSTOM, None, False),
-            (PYPMML, MULTICLASS, NO_CUSTOM, None, False),
-            (PYPMML, MULTICLASS_BINARY, NO_CUSTOM, None, False),
             (MLJ, REGRESSION, JULIA, None, False),
             (MLJ, BINARY, JULIA, None, False),
             (MLJ, MULTICLASS, JULIA, None, False),
             (PYTHON_TEXT_GENERATION, TEXT_GENERATION, PYTHON_TEXT_GENERATION, None, False),
             (PYTHON_GEO_POINT, GEO_POINT, PYTHON_GEO_POINT, None, False),
             (PYTHON_VECTOR_DATABASE, VECTOR_DATABASE, PYTHON_VECTOR_DATABASE, None, False),
+            (PYTHON_AGENTIC_WORKFLOW, AGENTIC_WORKFLOW, PYTHON_AGENTIC_WORKFLOW, None, False),
         ],
     )
     def test_custom_models_with_drum(
@@ -206,7 +204,7 @@ class TestInference:
             cmd += " --docker {} --verbose ".format(docker)
 
         env_vars = {}
-        if problem == TEXT_GENERATION:
+        if problem in (TEXT_GENERATION, AGENTIC_WORKFLOW):
             env_vars = {"TARGET_NAME": "Response"}
         elif problem == VECTOR_DATABASE:
             env_vars = {"TARGET_NAME": "relevant"}
@@ -231,7 +229,6 @@ class TestInference:
             # POJO is not a relevant case. POJO artifact is a `.java` file which allowed to be only lowercase
             (MOJO, REGRESSION, NO_CUSTOM, None, False),
             (MULTI_ARTIFACT, REGRESSION, PYTHON_LOAD_MODEL, None, False),
-            (PYPMML, REGRESSION, NO_CUSTOM, None, False),
             (MLJ, REGRESSION, JULIA, None, False),
         ],
     )
@@ -304,16 +301,13 @@ class TestInference:
             (POJO, MULTICLASS, NO_CUSTOM, None),
             (POJO, MULTICLASS_BINARY, NO_CUSTOM, None),
             (MULTI_ARTIFACT, REGRESSION, PYTHON_LOAD_MODEL, None),
-            (PYPMML, REGRESSION, NO_CUSTOM, None),
-            (PYPMML, BINARY, NO_CUSTOM, None),
-            (PYPMML, MULTICLASS, NO_CUSTOM, None),
-            (PYPMML, MULTICLASS_BINARY, NO_CUSTOM, None),
             (MLJ, BINARY, JULIA, None),
             (MLJ, REGRESSION, JULIA, None),
             (MLJ, MULTICLASS, JULIA, None),
             (PYTHON_TEXT_GENERATION, TEXT_GENERATION, PYTHON_TEXT_GENERATION, None),
             (PYTHON_GEO_POINT, GEO_POINT, PYTHON_GEO_POINT, None),
             (PYTHON_VECTOR_DATABASE, VECTOR_DATABASE, PYTHON_VECTOR_DATABASE, None),
+            (PYTHON_AGENTIC_WORKFLOW, AGENTIC_WORKFLOW, PYTHON_AGENTIC_WORKFLOW, None),
         ],
     )
     @pytest.mark.parametrize("pass_args_as_env_vars", [False])
@@ -347,7 +341,7 @@ class TestInference:
         unset_drum_supported_env_vars()
 
         env_vars = {}
-        if problem == TEXT_GENERATION:
+        if problem in (TEXT_GENERATION, AGENTIC_WORKFLOW):
             env_vars = {"TARGET_NAME": "Response"}
         elif problem == VECTOR_DATABASE:
             env_vars = {"TARGET_NAME": "relevant"}

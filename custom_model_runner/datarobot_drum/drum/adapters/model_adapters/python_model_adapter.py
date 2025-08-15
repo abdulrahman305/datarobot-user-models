@@ -21,12 +21,11 @@ from scipy.sparse import issparse
 
 from datarobot_drum.drum.adapters.model_adapters.abstract_model_adapter import AbstractModelAdapter
 from datarobot_drum.drum.artifact_predictors.keras_predictor import KerasPredictor
-from datarobot_drum.drum.artifact_predictors.pmml_predictor import PMMLPredictor
 from datarobot_drum.drum.artifact_predictors.sklearn_predictor import SKLearnPredictor
 from datarobot_drum.drum.artifact_predictors.torch_predictor import PyTorchPredictor
 from datarobot_drum.drum.artifact_predictors.xgboost_predictor import XGBoostPredictor
 from datarobot_drum.drum.artifact_predictors.onnx_predictor import ONNXPredictor
-
+from datarobot_drum.drum.root_predictors.chat_helpers import is_openai_model
 from datarobot_drum.drum.common import (
     reroute_stdout_to_stderr,
     SupportedPayloadFormats,
@@ -46,10 +45,7 @@ from datarobot_drum.drum.enum import (
     PayloadFormat,
     StructuredDtoKeys,
     TargetType,
-    GUARD_INIT_HOOK_NAME,
-    GUARD_SCORE_WRAPPER_NAME,
-    GUARD_CHAT_WRAPPER_NAME,
-    GUARD_HOOK_MODULE,
+    MODERATIONS_HOOK_MODULE,
     MODERATIONS_LIBRARY_PACKAGE,
 )
 from datarobot_drum.drum.exceptions import (
@@ -67,6 +63,8 @@ from datarobot_drum.custom_task_interfaces.custom_task_interface import (
     load_secrets,
     patch_outputs_to_scrub_secrets,
 )
+
+from datarobot_drum import RuntimeParameters
 
 RUNNING_LANG_MSG = "Running environment language: Python."
 
@@ -94,7 +92,6 @@ class PythonModelAdapter(AbstractModelAdapter):
             KerasPredictor(),
             XGBoostPredictor(),
             PyTorchPredictor(),
-            PMMLPredictor(),
             SKLearnPredictor(),
             ONNXPredictor(),
         ]
@@ -107,43 +104,65 @@ class PythonModelAdapter(AbstractModelAdapter):
         # New custom task class and instance loaded from custom.py
         self._custom_task_class = None
         self._custom_task_class_instance = None
-        self._guard_moderation_hooks = None
-        self._guard_pipeline = None
+        self._mod_pipeline = None
 
-        if target_type in (TargetType.TEXT_GENERATION, TargetType.VECTOR_DATABASE):
+        if target_type in (
+            TargetType.TEXT_GENERATION,
+            TargetType.VECTOR_DATABASE,
+            TargetType.AGENTIC_WORKFLOW,
+        ):
             self._target_name = os.environ.get("TARGET_NAME")
             if not self._target_name:
                 raise ValueError(
-                    "Unexpected empty target name for text generation or vector database target."
+                    "Unexpected empty target name for text generation, "
+                    "vector database, or agentic workflow target."
                 )
-            if target_type == TargetType.TEXT_GENERATION:
-                self._load_guard_hooks_for_drum()
+            # Instrument http clients in order to get nice traces from moderation library. We are
+            # doing this here because moderation library is loaded before custom.py.
+            try:
+                from opentelemetry.instrumentation.requests import RequestsInstrumentor
+
+                RequestsInstrumentor().instrument()
+            except (ImportError, ModuleNotFoundError):
+                msg = """Instrumentation for requests is not loaded, make sure appropriate
+                packages are installed:
+
+                pip install opentelemetry-instrumentation-requests
+                """
+            try:
+                from opentelemetry.instrumentation.aiohttp_client import AioHttpClientInstrumentor
+
+                AioHttpClientInstrumentor().instrument()
+            except (ImportError, ModuleNotFoundError):
+                msg = """Instrumentation for aiottp is not loaded, make sure appropriate
+                packages are installed:
+
+                pip install opentelemetry-instrumentation-aiohttp-client
+                """
+                self._logger.warning(msg)
+            self._load_moderation_hooks(model_dir)
         else:
             self._target_name = None
 
-    def _load_guard_hooks_for_drum(self):
+    def _load_moderation_hooks(self, model_dir):
         try:
-            guard_module = __import__(GUARD_HOOK_MODULE, fromlist=[MODERATIONS_LIBRARY_PACKAGE])
+            mod_module = __import__(MODERATIONS_HOOK_MODULE, fromlist=[MODERATIONS_LIBRARY_PACKAGE])
             self._logger.info(
-                f"Detected {guard_module.__name__} in {guard_module.__file__}.. "
-                f"trying to load hooks"
+                f"Detected {mod_module.__name__} in {mod_module.__file__}.. trying to load hooks"
             )
-            self._guard_moderation_hooks = {
-                GUARD_INIT_HOOK_NAME: getattr(guard_module, GUARD_INIT_HOOK_NAME, None),
-                GUARD_SCORE_WRAPPER_NAME: getattr(guard_module, GUARD_SCORE_WRAPPER_NAME, None),
-                GUARD_CHAT_WRAPPER_NAME: getattr(guard_module, GUARD_CHAT_WRAPPER_NAME, None),
-            }
-            if self._guard_moderation_hooks[GUARD_INIT_HOOK_NAME] and (
-                self._guard_moderation_hooks[GUARD_SCORE_WRAPPER_NAME]
-                or self._guard_moderation_hooks[GUARD_CHAT_WRAPPER_NAME]
-            ):
-                self._guard_pipeline = self._guard_moderation_hooks[GUARD_INIT_HOOK_NAME]()
+            # use the 'moderation_pipeline_factory()' to determine if moderations has integrated pipeline
+            if hasattr(mod_module, "moderation_pipeline_factory"):
+                self._mod_pipeline = mod_module.moderation_pipeline_factory(
+                    self._target_type.value, model_dir=str(model_dir)
+                )
             else:
-                self._logger.debug("No guards defined")
+                self._logger.warning(f"No support of {self._target_type} target in moderations.")
 
         except ImportError as e:
-            self._logger.warning(f"Could not load guard hooks: {e}, moderation will be disabled")
-            # Just log that no guard info present
+            self._logger.warning(
+                f"Could not load moderation hooks: {e}, moderation will be disabled"
+            )
+            # Just log that no moderation info present
 
     def _log_and_raise_final_error(self, exc: Exception, message: str) -> NoReturn:
         self._logger.exception(f"{message} Exception: {exc!r}")
@@ -595,25 +614,18 @@ class PythonModelAdapter(AbstractModelAdapter):
         if request_labels is not None:
             assert all(isinstance(label, str) for label in request_labels)
         extra_model_output = None
-        if self._custom_hooks.get(CustomHooks.SCORE):
+        score_fn = self._custom_hooks.get(CustomHooks.SCORE)
+        if score_fn:
             try:
-                if self._target_type == TargetType.TEXT_GENERATION and self._guard_pipeline:
-                    predictions_df = self._guard_moderation_hooks[GUARD_SCORE_WRAPPER_NAME](
-                        data,
-                        model,
-                        self._guard_pipeline,
-                        self._custom_hooks.get(CustomHooks.SCORE),
-                        **kwargs,
-                    )
+                if self._mod_pipeline:
+                    predictions_df = self._mod_pipeline.score(data, model, score_fn, **kwargs)
                     if self._target_name not in predictions_df:
                         predictions_df.rename(
                             columns={"completion": self._target_name}, inplace=True
                         )
                 else:
                     # noinspection PyCallingNonCallable
-                    predictions_df = self._custom_hooks.get(CustomHooks.SCORE)(
-                        data, model, **kwargs
-                    )
+                    predictions_df = score_fn(data, model, **kwargs)
             except Exception as exc:
                 self._log_and_raise_final_error(
                     exc, "Model 'score' hook failed to make predictions."
@@ -747,21 +759,61 @@ class PythonModelAdapter(AbstractModelAdapter):
         PythonModelAdapter._validate_unstructured_predictions(predictions)
         return predictions
 
-    def chat(self, completion_create_params, model, association_id):
-        if (
-            self._target_type == TargetType.TEXT_GENERATION
-            and self._guard_pipeline
-            and self._guard_moderation_hooks[GUARD_CHAT_WRAPPER_NAME]
-        ):
-            return self._guard_moderation_hooks[GUARD_CHAT_WRAPPER_NAME](
-                completion_create_params,
-                model,
-                self._guard_pipeline,
-                self._custom_hooks.get(CustomHooks.CHAT),
-                association_id,
-            )
+    def chat(self, completion_create_params, model, association_id, **kwargs):
+        chat_fn = self._custom_hooks.get(CustomHooks.CHAT)
+        if self._mod_pipeline:
+            return self._mod_pipeline.chat(completion_create_params, model, chat_fn, association_id)
+
+        chat_fn_params = signature(chat_fn).parameters
+        if len(chat_fn_params) > 2:
+            return chat_fn(completion_create_params, model, **kwargs)
         else:
-            return self._custom_hooks.get(CustomHooks.CHAT)(completion_create_params, model)
+            return chat_fn(completion_create_params, model)
+
+    def get_supported_llm_models(self, model):
+        """
+        Return list of LLM models supported by this custom model.
+        Usually, the trigger is a call to OpenAI models.list() (/v1/models, or /models)
+
+        If custom.py defines get_supported_llm_models(), use its returned list.
+        If that hook is not defined, return the model defined in LLM_ID runtime parameter.
+        If neither is present, return an empty list.
+
+        Parameters
+        ----------
+        model
+
+        Returns
+        -------
+        Dict matching JSON structure of GET https://api.openai.com/v1/models response:
+        {"object": "list", "data": [{id, object, created, owned_by}, ...]}
+        """
+        result = {"object": "list", "data": []}
+        if self._custom_hooks.get(CustomHooks.GET_SUPPORTED_LLM_MODELS_LIST):
+            self._logger.debug("get_supported_llm_models: custom.py defines the hook")
+            response = self._custom_hooks.get(CustomHooks.GET_SUPPORTED_LLM_MODELS_LIST)(model)
+            for model in response:
+                if is_openai_model(model):
+                    result["data"].append(model.to_dict())
+        else:
+            # defining the hook overrides built-in behavior and is optional
+            self._logger.debug("get_supported_llm_models: hook is not defined")
+            llm_id_key = "LLM_ID"
+            if RuntimeParameters.has(llm_id_key):
+                self._logger.debug("get_supported_llm_models: returning LLM_ID")
+                llm_id = RuntimeParameters.get(llm_id_key)
+                result["data"].append(
+                    {
+                        "id": llm_id,
+                        "object": "model",
+                        "created": 1735689600,  # Jan. 1, 2025
+                        "owned_by": "DataRobot",
+                    }
+                )
+            else:
+                self._logger.debug("get_supported_llm_models: returning empty list")
+
+        return result
 
     def fit(
         self,

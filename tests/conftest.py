@@ -18,9 +18,7 @@ from tests.constants import (
     PYTHON_XGBOOST,
     PYTHON_KERAS,
     PYTHON_PYTORCH,
-    PYTHON311_GENAI,
     PYTHON_ONNX,
-    PYTHON_PYPMML,
     R_LANG,
     JAVA_CODEGEN,
     ANOMALY,
@@ -48,7 +46,6 @@ from tests.constants import (
     NO_CUSTOM,
     ONNX,
     POJO,
-    PYPMML,
     PYTHON,
     SKLEARN_NO_ARTIFACTS,
     PYTHON_ALL_PREDICT_STRUCTURED_HOOKS,
@@ -150,6 +147,8 @@ from tests.constants import (
     PYTHON_TEXT_GENERATION,
     GEO_POINT,
     PYTHON_GEO_POINT,
+    AGENTIC_WORKFLOW,
+    PYTHON_AGENTIC_WORKFLOW,
     GPU_TRITON,
     GPU_NIM,
     GPU_NIM_SIDECAR,
@@ -197,9 +196,7 @@ framework_envs = {
         CUSTOM_TASK_INTERFACE_PYTORCH_BINARY,
         CUSTOM_TASK_INTERFACE_PYTORCH_MULTICLASS,
     ],
-    PYTHON311_GENAI: [PYTHON_TEXT_GENERATION],
     PYTHON_ONNX: [ONNX],
-    PYTHON_PYPMML: [PYPMML],
     R_LANG: [
         R_ESTIMATOR_SPARSE,
         R_VALIDATE_SPARSE_ESTIMATOR,
@@ -256,9 +253,7 @@ def pytest_addoption(parser):
             PYTHON_XGBOOST,
             PYTHON_KERAS,
             PYTHON_PYTORCH,
-            PYTHON311_GENAI,
             PYTHON_ONNX,
-            PYTHON_PYPMML,
             R_LANG,
             JAVA_CODEGEN,
             JULIA,
@@ -307,7 +302,6 @@ _datasets = {
     (None, BINARY_TEXT): os.path.join(TESTS_DATA_PATH, "telecomms_churn.csv"),
     (None, BINARY_NUM_ONLY): os.path.join(TESTS_DATA_PATH, "iris_binary_training.csv"),
     (None, BINARY_NUM_TARGET): os.path.join(TESTS_DATA_PATH, "iris_with_binary.csv"),
-    (PYPMML, REGRESSION): os.path.join(TESTS_DATA_PATH, "iris_binary_training.csv"),
     (None, BINARY): os.path.join(TESTS_DATA_PATH, "iris_binary_training.csv"),
     (None, ANOMALY): os.path.join(TESTS_DATA_PATH, "juniors_3_year_stats_regression_inference.csv"),
     (None, UNSTRUCTURED): os.path.join(TESTS_DATA_PATH, "unstructured_data.txt"),
@@ -354,6 +348,7 @@ _datasets = {
     (None, MULTICLASS_LABEL_SPACES): os.path.join(TESTS_DATA_PATH, "iris_with_spaces_full.csv"),
     (PYTHON_TEXT_GENERATION, TEXT_GENERATION): os.path.join(TESTS_DATA_PATH, "prompts.csv"),
     (PYTHON_GEO_POINT, GEO_POINT): os.path.join(TESTS_DATA_PATH, "geo_dataset.csv"),
+    (PYTHON_AGENTIC_WORKFLOW, AGENTIC_WORKFLOW): os.path.join(TESTS_DATA_PATH, "prompts.csv"),
 }
 
 _training_models_paths = {
@@ -445,6 +440,7 @@ _targets = {
     MULTICLASS_LABEL_SPACES: "Species",
     TEXT_GENERATION: "COMPLETION",
     GEO_POINT: "coordinates",
+    AGENTIC_WORKFLOW: "Response",
 }
 
 _target_types = {
@@ -472,6 +468,7 @@ _target_types = {
     MULTICLASS_LABEL_SPACES: "multiclass",
     TEXT_GENERATION: "textgeneration",
     GEO_POINT: "geopoint",
+    AGENTIC_WORKFLOW: "agenticworkflow",
 }
 
 _class_labels = {
@@ -485,7 +482,6 @@ _class_labels = {
     (KERAS, BINARY): ["Iris-setosa", "Iris-versicolor"],
     (RDS, BINARY): ["Iris-setosa", "Iris-versicolor"],
     (RDS_BINARY, BINARY_INT): ["0", "1"],
-    (PYPMML, BINARY): ["Iris-setosa", "Iris-versicolor"],
     (PYTORCH, BINARY): ["Iris-setosa", "Iris-versicolor"],
     (ONNX, BINARY): ["Iris-setosa", "Iris-versicolor"],
     (CODEGEN, BINARY): ["Iris-setosa", "Iris-versicolor"],
@@ -591,7 +587,6 @@ _class_labels = {
     (XGB, MULTICLASS): ["GALAXY", "QSO", "STAR"],
     (KERAS, MULTICLASS): ["GALAXY", "QSO", "STAR"],
     (RDS, MULTICLASS): ["GALAXY", "QSO", "STAR"],
-    (PYPMML, MULTICLASS): ["GALAXY", "QSO", "STAR"],
     (PYTORCH_MULTICLASS, MULTICLASS): ["GALAXY", "QSO", "STAR"],
     (PYTORCH, MULTICLASS): ["GALAXY", "QSO", "STAR"],
     (ONNX, MULTICLASS): ["GALAXY", "QSO", "STAR"],
@@ -609,7 +604,6 @@ _class_labels = {
     (XGB, MULTICLASS_BINARY): ["Iris-setosa", "Iris-versicolor"],
     (KERAS, MULTICLASS_BINARY): ["Iris-setosa", "Iris-versicolor"],
     (RDS, MULTICLASS_BINARY): ["Iris-setosa", "Iris-versicolor"],
-    (PYPMML, MULTICLASS_BINARY): ["Iris-setosa", "Iris-versicolor"],
     (PYTORCH, MULTICLASS_BINARY): ["Iris-setosa", "Iris-versicolor"],
     (ONNX, MULTICLASS_BINARY): ["Iris-setosa", "Iris-versicolor"],
     (CODEGEN, MULTICLASS_BINARY): ["yes", "no"],
@@ -620,6 +614,7 @@ _class_labels = {
     (MLJ, MULTICLASS): ["GALAXY", "QSO", "STAR"],
     (PYTHON_TEXT_GENERATION, TEXT_GENERATION): None,
     (PYTHON_GEO_POINT, GEO_POINT): None,
+    (PYTHON_AGENTIC_WORKFLOW, AGENTIC_WORKFLOW): None,
 }
 
 # key: list of tuples; tuple: (artifact path, Optional(rename to a new name))
@@ -689,9 +684,6 @@ _artifacts = {
     (MLJ, REGRESSION): os.path.join(TESTS_ARTIFACTS_PATH, "grade_regression.jlso"),
     (MLJ, BINARY): os.path.join(TESTS_ARTIFACTS_PATH, "iris_binary.jlso"),
     (MLJ, MULTICLASS): os.path.join(TESTS_ARTIFACTS_PATH, "galaxy.jlso"),
-    (PYPMML, REGRESSION): os.path.join(TESTS_ARTIFACTS_PATH, "iris_reg.pmml"),
-    (PYPMML, BINARY): os.path.join(TESTS_ARTIFACTS_PATH, "iris_bin.pmml"),
-    (PYPMML, MULTICLASS): os.path.join(TESTS_ARTIFACTS_PATH, "iris_multi.pmml"),
     (SKLEARN, MULTICLASS): os.path.join(TESTS_ARTIFACTS_PATH, "sklearn_multi.pkl"),
     (XGB, MULTICLASS): os.path.join(TESTS_ARTIFACTS_PATH, "xgb_multi.pkl"),
     (KERAS, MULTICLASS): os.path.join(TESTS_ARTIFACTS_PATH, "keras_multi.h5"),
@@ -730,7 +722,6 @@ _artifacts = {
         "XGBoost_grid__1_AutoML_20200717_163214_model_159.java",
     ),
     (MOJO, MULTICLASS_BINARY): os.path.join(TESTS_ARTIFACTS_PATH, "mojo_bin.zip"),
-    (PYPMML, MULTICLASS_BINARY): os.path.join(TESTS_ARTIFACTS_PATH, "iris_bin.pmml"),
     (SKLEARN_TRANSFORM_WITH_Y, REGRESSION): None,
     (SKLEARN_TRANSFORM_WITH_Y, BINARY): None,
     (SKLEARN_TRANSFORM_WITH_Y, ANOMALY): None,
@@ -800,6 +791,7 @@ _artifacts = {
     (CUSTOM_TASK_INTERFACE_XGB_REGRESSION, REGRESSION): None,
     (PYTHON_TEXT_GENERATION, TEXT_GENERATION): None,
     (PYTHON_GEO_POINT, GEO_POINT): None,
+    (PYTHON_AGENTIC_WORKFLOW, AGENTIC_WORKFLOW): None,
 }
 
 _custom_filepaths = {
@@ -863,6 +855,10 @@ _custom_filepaths = {
     ),
     PYTHON_GEO_POINT: (
         os.path.join(TESTS_FIXTURES_PATH, "geo_point_custom.py"),
+        "custom.py",
+    ),
+    PYTHON_AGENTIC_WORKFLOW: (
+        os.path.join(TESTS_FIXTURES_PATH, "text_generation_custom.py"),
         "custom.py",
     ),
     PYTHON_UNSTRUCTURED: (os.path.join(TESTS_FIXTURES_PATH, "unstructured_custom.py"), "custom.py"),

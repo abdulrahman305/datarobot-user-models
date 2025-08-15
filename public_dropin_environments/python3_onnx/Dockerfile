@@ -1,13 +1,17 @@
 # This is a private chain-guard development image that is stored in DataRobot's private registry.
 # Replace it with your own development chain-gaurd image if you build your own.
-ARG BASE_ROOT_IMAGE=datarobotdev/mirror_chainguard_datarobot.com_python-fips:3.11-dev
+ARG BASE_ROOT_IMAGE=datarobot/mirror_chainguard_datarobot.com_python-fips:3.11-dev
 FROM ${BASE_ROOT_IMAGE} AS build
 
 # This is a private production chain-guard image that is stored in DataRobot's private registry.
 # Replace it with your own production chain-gaurd image if you build your own.
-FROM datarobotdev/mirror_chainguard_datarobot.com_python-fips:3.11
+FROM datarobot/mirror_chainguard_datarobot.com_python-fips:3.11
 
 USER root
+
+# Most of the binaries below are just symlinks to busybox and some OCI build tools follow
+# symlinks (Docker buildkit) and some do not (Kaniko) so copy this in to be safe.
+COPY --from=build /usr/bin/busybox /usr/bin/busybox
 
 # Required to run the entrypoint script
 COPY --from=build /bin/sh /bin/sh
@@ -17,6 +21,9 @@ COPY --from=build /bin/chown /bin/chown
 
 # Required to change the permissions of the 'start_server.sh' that is copied into the managed-image
 COPY --from=build /bin/chmod /bin/chmod
+
+# Required to change the ownership for Custom Models PPS
+COPY --from=build /bin/chgrp /bin/chgrp
 
 # Required for DR backend to create /opt/code (Maybe required by applications other than custom-models)
 COPY --from=build /bin/mkdir /bin/mkdir
@@ -40,8 +47,7 @@ RUN sh -c "python -m venv ${VIRTUAL_ENV} && \
     python -m ensurepip --default-pip && \
     python -m pip install --upgrade pip && \
     python -m pip install --no-cache-dir -r requirements.txt && \
-    find ${VIRTUAL_ENV} -type d -name '__pycache__' -exec rm -rf {} + && \
-    rm -rf /usr/bin/rm /usr/bin/find"
+    find ${VIRTUAL_ENV} -type d -name '__pycache__' -exec rm -rf {} +"
 
 ENV PATH=${VIRTUAL_ENV}/bin:${PATH}
 ENV HOME=/opt

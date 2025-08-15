@@ -4,10 +4,68 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+#### [1.16.22] - 2025-08-12
+##### Changed
+- Add support for kwargs and headers to generative ai chat models
+- Fix support for drum inline execution
+
+#### [1.16.21] - 2025-07-16
+##### Removed
+- Removed PMML support
+
+#### [1.16.20] - 2025-07-03
+#### Changed
+- Fixed VLLM support.
+
+#### [1.16.19] - 2025-06-26
+#### Changed
+- Allow override NIM server details.
+
+#### [1.16.18] - 2025-06-24
+##### Changed
+- Added support for drum inline predictor for agentic models
+- Updated mlops to use improved async mode
+
+#### [1.16.17] - 2025-06-05
+##### Changed
+- Fixed issue with OTel tracing when flask server uses more then on process
+- Added gracefull shutdown for OTel tracer
+
+#### [1.16.16] - 2025-06-03
+##### Changed
+- Minor improvements required for chat API and agentic metrics
+
+#### [1.16.15] - 2025-05-30
+##### Changed
+- Added OTel instrumentation for chat interface.
+
+#### [1.16.14] - 2025-05-27
+##### Changed 
+- Fix for `chat()` with a `ModerationPipeline`.
+
+#### [1.16.13] - 2025-05-12
+##### Added 
+- Request ID for logging messages
+- API requests are logged with Request ID
+- Access log with request_id for errored API calls
+- Add support for `AGENTIC_WORKFLOW` target type
+
+##### Changed
+- Using logs output for all server operations. `print` command is discouraged in user modules.
+
+#### [1.16.12] - 2025-04-23
+##### Changed
+- Allow `select` advanced tuning parameters to be up to 1024 characters
+- Add support for `get_supported_llm_models()` hook with OpenAI `v1/models` API.
+
 #### [1.16.11] - 2025-03-31
 ##### Changed
 - Add support for `extra_body` handling in NIM and vLLM chat completion proxy endpoints.
 - Use optimized `association_id` generation logic for chat completions.
+
+#### [1.16.10.post1] - 2025-06-25
+#### Changed
+- Allow override NIM server details.
 
 #### [1.16.10] - 2025-03-19
 ##### Changed
