@@ -30,6 +30,7 @@ COPY --from=build /bin/mkdir /bin/mkdir
 
 # Required for custom-models to install dependencies
 COPY --from=build /usr/bin/pip /usr/bin/pip
+COPY --from=build /usr/lib/python3.11/site-packages/pip /usr/lib/python3.11/site-packages/pip
 
 # Cleanup '__pycache__' directories. It solves an AsymmetricPrivateKey scanning error.
 COPY --from=build /usr/bin/rm /usr/bin/rm
@@ -42,11 +43,9 @@ COPY requirements.txt requirements.txt
 
 ENV VIRTUAL_ENV=/opt/venv
 
-RUN sh -c "python -m venv ${VIRTUAL_ENV} && \
+RUN sh -c "/usr/bin/python -m venv --without-pip ${VIRTUAL_ENV} && \
     . ${VIRTUAL_ENV}/bin/activate && \
-    python -m ensurepip --default-pip && \
-    python -m pip install --upgrade pip && \
-    python -m pip install --no-cache-dir -r requirements.txt && \
+    /usr/bin/python -m pip install --no-cache-dir -r requirements.txt && \
     find ${VIRTUAL_ENV} -type d -name '__pycache__' -exec rm -rf {} +"
 
 ENV PATH=${VIRTUAL_ENV}/bin:${PATH}
@@ -57,7 +56,7 @@ ENV ADDRESS=0.0.0.0:8080
 # MARK: FUNCTIONAL-TEST-ADD-HERE. (This line is used by DRUM functional test automation and can be safely ignored.)
 
 # This makes print statements show up in the logs API
-ENV WITH_ERROR_SERVER=1 \
+ENV WITH_ERROR_SERVER=0 \
     PYTHONUNBUFFERED=1
 
 
