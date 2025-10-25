@@ -46,7 +46,7 @@
         <dependency>
             <groupId>ai.h2o</groupId>
             <artifactId>h2o-ext-mojo-pipeline</artifactId>
-            <version>3.40.0.4</version>
+            <version>3.46.0.8</version>
             <scope>provided</scope>
         </dependency>
         <dependency>
