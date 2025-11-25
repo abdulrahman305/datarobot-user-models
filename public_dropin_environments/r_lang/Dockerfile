@@ -27,6 +27,17 @@ RUN apk add --no-cache \
 ENV R_HOME=/usr/lib/R
 ENV LD_LIBRARY_PATH=${R_HOME}/lib:/usr/lib
 
+# Fix chainguard broken libxml2 link
+# When broken, points to libxml2.so.16.1.1, which doesn't exist, but
+# libxml2.so.16.1.0 does.
+# TODO: Remove this when chainguard fixes upstream.
+RUN \
+  if [ ! -e /usr/lib/libxml2.so ]; then \
+    printf 'WARNING: broken libxml2.so link detected. Fixing\n' >&2; \
+    rm -f /usr/lib/libxml2.so; \
+    ln -s $(readlink /usr/lib/libxml2.so.16) /usr/lib/libxml2.so; \
+  fi
+
 RUN Rscript -e "install.packages( \
         c('caret', 'recipes', 'glmnet', 'Rook', 'rjson', 'e1071', 'tidyverse', 'devtools'), \
         repos='https://cloud.r-project.org', \
@@ -64,6 +75,7 @@ COPY --from=build /usr/lib/libcurl* /usr/lib/
 COPY --from=build /usr/lib/libtiff* /usr/lib/
 COPY --from=build /usr/lib/libjpeg* /usr/lib/
 COPY --from=build /usr/lib/libnghttp2.so.* /usr/lib/
+COPY --from=build /usr/lib/libnghttp3.so.* /usr/lib/
 COPY --from=build /usr/lib/libpsl* /usr/lib/
 COPY --from=build /usr/lib/libgssapi_krb5* /usr/lib/
 COPY --from=build /usr/lib/libldap* /usr/lib/
